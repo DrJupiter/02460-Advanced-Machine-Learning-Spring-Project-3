@@ -4,10 +4,35 @@ from torch.utils.data import random_split
 import torch
 import networkx as nx
 import matplotlib.pyplot as plt
+from torchvision import transforms
 
+from enum import Enum
+
+class Sorting(Enum):
+    NONE = 0
+    DEGREE = 1
+    SPECTRAL = 2
+    BFS = 3
+
+import torch
+from torch_geometric.utils import to_networkx
+import networkx as nx
+import numpy as np
+import torch_geometric
+class SpectralSorting:
+
+    def __call__(self, data):
+        G = to_networkx(data, to_undirected=True)
+        laplacian = nx.normalized_laplacian_matrix(G).todense()
+        eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
+        fiedler_vector = eigenvectors[:, 1]
+        permutation = torch.tensor(fiedler_vector.argsort(), device=data.x.device)
+        data.x = data.x[permutation]
+        data.edge_index, _ = torch_geometric.utils.subgraph(permutation, data.edge_index, relabel_nodes=True)
+        return data
 
 class GraphDataLoader:
-    def __init__(self, dataset_name, batch_size=(100,44,44), device='cpu', seed=0):
+    def __init__(self, dataset_name, batch_size=(100,44,44), device='cpu', seed=0, sorting: Sorting = Sorting.NONE):
         self.dataset_name = dataset_name
         self.batch_size = batch_size # (train, validation, test)
         self.total_num_graphs = sum(batch_size)
@@ -25,7 +50,7 @@ class GraphDataLoader:
 
     def setup_MUTAG_data_loaders(self):
         # Load data
-        self.dataset = TUDataset(root='./data/', name='MUTAG').to(self.device)
+        self.dataset = TUDataset(root='./data/', name='MUTAG', transform=SpectralSorting()).to(self.device)
         self.node_feature_dim = 7
 
         # Split into training and validation

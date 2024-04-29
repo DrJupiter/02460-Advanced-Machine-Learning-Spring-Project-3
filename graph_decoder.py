@@ -90,6 +90,8 @@ class SimpleGraphConv(torch.nn.Module):
             Neural network output for each graph.
 
         """
+
+
         lenghts = []
         edge_index = []
         for item in batch_generate_directed_edges(number_of_nodes):
@@ -98,6 +100,8 @@ class SimpleGraphConv(torch.nn.Module):
         lenghts = torch.tensor(lenghts)
         edge_index = torch.cat(edge_index, dim=1)
         batch = torch.arange(len(number_of_nodes)).repeat_interleave(lenghts)
+        
+        # loop over the 
 
         # Extract number of nodes and graphs
         num_graphs = batch.max()+1
@@ -130,7 +134,108 @@ class SimpleGraphConv(torch.nn.Module):
         out = torch.tensordot(out, self.tensor_scale, dims=([1], [0]))
         out = torch.tensordot(out, out, dims=([0], [0]))
         return torch.sigmoid(out)
-    
+
+# %% Define a simple GNN for graph classification
+class SimpleGNN(torch.nn.Module):
+    """Simple graph neural network for graph classification
+
+    Keyword Arguments
+    -----------------
+        node_feature_dim : Dimension of the node features
+        state_dim : Dimension of the node states
+        num_message_passing_rounds : Number of message passing rounds
+    """
+
+    def __init__(self, node_feature_dim, state_dim, num_message_passing_rounds):
+        super().__init__()
+
+        # Define dimensions and other hyperparameters
+        self.node_feature_dim = node_feature_dim
+        self.state_dim = state_dim
+        self.num_message_passing_rounds = num_message_passing_rounds
+
+        # Input network
+        self.input_net = torch.nn.Sequential(
+            torch.nn.Linear(self.node_feature_dim, self.state_dim),
+            torch.nn.ReLU()
+            )
+
+        # Message networks
+        self.message_net = torch.nn.ModuleList([
+            torch.nn.Sequential(
+                torch.nn.Linear(self.state_dim, self.state_dim),
+                torch.nn.ReLU()
+            ) for _ in range(num_message_passing_rounds)])
+
+        # Update network
+        self.update_net = torch.nn.ModuleList([
+            torch.nn.Sequential(
+                torch.nn.Linear(self.state_dim, self.state_dim),
+                torch.nn.ReLU()
+            ) for _ in range(num_message_passing_rounds)])
+
+        # State output network
+        self.output_net = torch.nn.Linear(self.state_dim, 1)
+
+    def forward(self, x, number_of_nodes):
+        """Evaluate neural network on a batch of graphs.
+
+        Parameters
+        ----------
+        x : torch.tensor (num_nodes x num_features)
+            Node features.
+        edge_index : torch.tensor (2 x num_edges)
+            Edges (to-node, from-node) in all graphs.
+        batch : torch.tensor (num_nodes)
+            Index of which graph each node belongs to.
+
+        Returns
+        -------
+        out : torch tensor (num_graphs)
+            Neural network output for each graph.
+
+        """
+
+        lenghts = []
+        edge_index = []
+        for item in batch_generate_directed_edges(number_of_nodes):
+            edge_index.append(item)
+            lenghts.append(item.shape[1])
+        lenghts = torch.tensor(lenghts)
+        edge_index = torch.cat(edge_index, dim=1)
+        batch = torch.arange(len(number_of_nodes)).repeat_interleave(lenghts)
+
+        # Extract number of nodes and graphs
+        num_graphs = batch.max()+1
+        num_nodes = batch.shape[0]
+
+        # Initialize node state from node features
+        state = self.input_net(x)
+        # state = x.new_zeros([num_nodes, self.state_dim]) # Uncomment to disable the use of node features
+
+        # Loop over message passing rounds
+        for r in range(self.num_message_passing_rounds):
+            # Compute outgoing messages
+            message = self.message_net[r](state)
+
+            # Aggregate: Sum messages
+            aggregated = x.new_zeros((num_nodes, self.state_dim))
+            aggregated = aggregated.index_add(0, edge_index[1], message[edge_index[0]])
+
+            # Update states
+            state = state + self.update_net[r](aggregated)
+
+        # Aggretate: Sum node features
+        graph_state = x.new_zeros((num_graphs, self.state_dim))
+        graph_state = torch.index_add(graph_state, 0, batch, state)
+
+        # Output
+        out = self.output_net(graph_state).flatten()
+        # We should then return one big adjacency matrix for all the graphs
+        
+        return out
+
+
 # %% Set up the model, loss, and optimizer etc.
 # Instantiate the model
 filter_length = 3

@@ -7,7 +7,7 @@ from dataloader import GraphDataLoader
 
 
 seed = 0
-device = 'cpu'
+device = 'cuda'
 dataset_name = 'MUTAG'
 # (train, validation, test) must sum to the total number of graphs in the dataset (188)
 # we do not need a test set for this assignment as we implement a generative model
